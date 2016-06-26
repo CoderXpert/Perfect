@@ -141,23 +141,23 @@ class FastCGIRequest : WebConnection {
 	}
 	
 	func writeBody(bytes b: [UInt8], completion: (Bool) -> ()) {
-		if !wroteHeader {
-			header += "\r\n" // final CRLF
-			writeHeader(bytes: [UInt8](header.utf8)) {
-				ok in
-				
-				guard ok else {
-					return completion(false)
-				}
-				
-				self.header = ""				
-				let b = self.makeStdoutBody(requestId: Int(self.requestId), data: b)
-				self.write(bytes: b, completion: completion)
-			}
-		} else {
-			let b = makeStdoutBody(requestId: Int(requestId), data: b)
-			write(bytes: b, completion: completion)
-		}
+        guard wroteHeader else {
+            let b = makeStdoutBody(requestId: Int(requestId), data: b)
+            write(bytes: b, completion: completion)
+            return
+        }
+        header += "\r\n" // final CRLF
+        writeHeader(bytes: [UInt8](header.utf8)) {
+            ok in
+            
+            guard ok else {
+                return completion(false)
+            }
+            
+            self.header = ""
+            let b = self.makeStdoutBody(requestId: Int(self.requestId), data: b)
+            self.write(bytes: b, completion: completion)
+        }
 	}
 	
 	func write(bytes byts: [UInt8], completion: (Bool) -> ()) {
@@ -240,43 +240,36 @@ class FastCGIRequest : WebConnection {
 	}
 	
 	func readRecordContent(record rec: FastCGIRecord, continuation: (FastCGIRecord?) -> ()) {
-		if rec.contentLength > 0 {
-			
-			self.connection.readBytesFully(count: Int(rec.contentLength), timeoutSeconds: fcgiTimeoutSeconds, completion: {
-				[weak self] (b:[UInt8]?) -> () in
-				if let contentBytes = b {
-					
-					rec.content = contentBytes
-					self?.readRecordPadding(record: rec, continuation: continuation)
-					
-				} else {
-					continuation(nil)
-				}
-			})
-			
-		} else {
-			self.readRecordPadding(record: rec, continuation: continuation)
-		}
+        guard rec.contentLength > 0 else {
+            self.readRecordPadding(record: rec, continuation: continuation)
+            return
+        }
+        self.connection.readBytesFully(count: Int(rec.contentLength), timeoutSeconds: fcgiTimeoutSeconds, completion: {
+            [weak self] (b:[UInt8]?) -> () in
+            guard let contentBytes = b else {
+                continuation(nil)
+                return
+            }
+            rec.content = contentBytes
+            self?.readRecordPadding(record: rec, continuation: continuation)
+        })
+        
 	}
 	
 	func readRecordPadding(record rec: FastCGIRecord, continuation: (FastCGIRecord?) -> ()) {
-		if rec.paddingLength > 0 {
-			
-			self.connection.readBytesFully(count: Int(rec.paddingLength), timeoutSeconds: fcgiTimeoutSeconds, completion: {
-				(b:[UInt8]?) -> () in
-				if let paddingBytes = b {
-					
-					rec.padding = paddingBytes
-					continuation(rec)
-					
-				} else {
-					continuation(nil)
-				}
-			})
-			
-		} else {
-			continuation(rec)
-		}
+        guard rec.paddingLength > 0 else {
+            continuation(rec)
+            return
+        }
+        self.connection.readBytesFully(count: Int(rec.paddingLength), timeoutSeconds: fcgiTimeoutSeconds, completion: {
+            (b:[UInt8]?) -> () in
+            guard paddingBytes = b else {
+                continuation(nil)
+                return
+            }
+            rec.padding = paddingBytes
+            continuation(rec)
+        })
 	}
 }
 
